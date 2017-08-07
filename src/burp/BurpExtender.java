@@ -26,7 +26,7 @@ import java.awt.event.ActionEvent;
 import java.beans.PropertyChangeListener;
 import java.beans.PropertyChangeEvent;
 
-public class BurpExtender implements IBurpExtender, IScannerInsertionPointProvider, ITab {
+public class BurpExtender implements IBurpExtender, IScannerInsertionPointProvider, ITab, IMessageEditorTabFactory {
     
 	// IExtensionHelpers helpers;
 	public IExtensionHelpers helpers;
@@ -68,7 +68,7 @@ public class BurpExtender implements IBurpExtender, IScannerInsertionPointProvid
         helpers = callbacks.getHelpers();
 
         // set our extension name
-        callbacks.setExtensionName("AES Crypto v1.1");
+        callbacks.setExtensionName("AES Crypto v1.2");
       
         // Register payload encoders
         payloadEncryptor = new IntruderPayloadProcessor(this, 1);
@@ -80,12 +80,149 @@ public class BurpExtender implements IBurpExtender, IScannerInsertionPointProvid
         // register ourselves as a scanner insertion point provider
         callbacks.registerScannerInsertionPointProvider(this);
         
+        // register ourselves as a message editor tab factory
+        callbacks.registerMessageEditorTabFactory(this);
+
         isURLEncoded = false;
         
         // Create UI
         this.addMenuTab();
     }
+
+    //
+    // implement IMessageEditorTabFactory
+    //
     
+    @Override
+    public IMessageEditorTab createNewInstance(IMessageEditorController controller, boolean editable) {
+        // create a new instance of the AES editor tab
+        return new AESTab(controller, editable);
+    }
+
+    //
+    // class implementing IMessageEditorTab
+    //
+
+    class AESTab implements IMessageEditorTab {
+        private boolean editable;
+        private ITextEditor txtInput;
+        private byte[] currentMessage;
+        private int currentBodyOffset;
+
+        public AESTab(IMessageEditorController controller, boolean editable) {
+            this.editable = editable;
+
+            // create an instance of Burp's text editor, to display the decrypted body
+            txtInput = callbacks.createTextEditor();
+            txtInput.setEditable(editable);
+        }
+
+        //
+        // implement IMessageEditorTab
+        //
+
+        @Override
+        public String getTabCaption() {
+            return "Decrypted";
+        }
+
+        @Override
+        public Component getUiComponent() {
+            return txtInput.getComponent();
+        }
+
+        @Override
+        public boolean isEnabled(byte[] content, boolean isRequest) {
+            String body = "";
+            byte[] bodyArray = content;
+            int bodyOffset = 0;
+
+            if (isRequest) {
+                bodyOffset = helpers.analyzeRequest(content).getBodyOffset();
+                bodyArray = Arrays.copyOfRange(content, bodyOffset, content.length);
+                body = helpers.bytesToString(bodyArray).replaceAll("\r", "").replaceAll("\n", "");
+            } else {
+                bodyOffset = helpers.analyzeResponse(content).getBodyOffset();
+                bodyArray = Arrays.copyOfRange(content, bodyOffset, content.length);
+                body = helpers.bytesToString(bodyArray);
+            }
+
+            try {
+                decrypt(body);
+                return true;
+            } catch(Exception e) {
+                return false;
+            }
+        }
+
+        @Override
+        public void setMessage(byte[] content, boolean isRequest) {
+            String body = "";
+            byte[] bodyArray = content;
+            int bodyOffset = 0;
+
+            if (content == null) {
+                // clear our display
+                txtInput.setText(null);
+                txtInput.setEditable(false);
+            } else {
+
+                if (isRequest) {
+                    bodyOffset = helpers.analyzeRequest(content).getBodyOffset();
+                    bodyArray = Arrays.copyOfRange(content, bodyOffset, content.length);
+                    body = helpers.bytesToString(bodyArray).replaceAll("\r", "").replaceAll("\n", "");
+                } else {
+                    bodyOffset = helpers.analyzeResponse(content).getBodyOffset();
+                    bodyArray = Arrays.copyOfRange(content, bodyOffset, content.length);
+                    body = helpers.bytesToString(bodyArray);
+                }
+
+                try {
+                    // decrypt the body
+                    txtInput.setText(helpers.stringToBytes(decrypt(body)));
+                    txtInput.setEditable(editable);
+                } catch(Exception e) {
+                }
+
+            }
+
+            // remember the displayed content
+            currentMessage = content;
+            currentBodyOffset = bodyOffset;
+        }
+
+        @Override
+        public byte[] getMessage() {
+            // determine whether the user modified the decrypted body
+            if (txtInput.isTextModified()) {
+                try {
+                    // encrypt the new message body
+                    String plainText = helpers.bytesToString(txtInput.getText());
+                    String cipherText = encrypt(plainText);
+                    byte[] newBody = helpers.stringToBytes(cipherText);
+
+                    // replace the original message body with the new one
+                    byte[] newMessage = new byte[currentBodyOffset + newBody.length];
+                    System.arraycopy(currentMessage, 0, newMessage, 0, currentBodyOffset);
+                    System.arraycopy(newBody, 0, newMessage, currentBodyOffset, newBody.length);
+
+                    return newMessage;
+                } catch(Exception e) {
+                }
+            }
+            return currentMessage;
+        }
+
+        @Override
+        public boolean isModified() {
+            return txtInput.isTextModified();
+        }
+
+        @Override
+        public byte[] getSelectedData() {
+            return txtInput.getSelectedText();
+        }
+    }
 
     /**
      * @wbp.parser.entryPoint
@@ -100,8 +237,8 @@ public class BurpExtender implements IBurpExtender, IScannerInsertionPointProvid
     	gbl_panel.columnWeights = new double[]{1.0, 1.0, Double.MIN_VALUE};
     	gbl_panel.rowWeights = new double[]{0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, Double.MIN_VALUE};
     	panel.setLayout(gbl_panel);
-    	
-        lblDescription = new JLabel("<html><b>BURP AES Manipulation functions v1.1</b>\r\n<br>\r\n<br>\r\ntwitter: twitter.com/lgrangeia\r\n<br>\r\ngithub: github.com/lgrangeia\r\n<br>\r\n<br>\r\nAES key can be 128, 192 or 256 bits, but you need to install Java Cryptography Extension (JCE) Unlimited Strength for 256 bit keys.<br>\r\nThis extension registers the following:\r\n<ul>\r\n  <li>AES Encrypt / Decrypt Payload Encoder</li>\r\n  <li>Scanner Insertion Point Provider: attempts to insert payloads inside encrypted insertion points</li>\r\n</ul>\r\n\r\n</html>");
+
+        lblDescription = new JLabel("<html><b>BURP AES Manipulation functions v1.2</b>\r\n<br>\r\n<br>\r\ntwitter: twitter.com/lgrangeia\r\n<br>\r\ngithub: github.com/lgrangeia\r\n<br>\r\n<br>\r\nAES key can be 128, 192 or 256 bits, but you need to install Java Cryptography Extension (JCE) Unlimited Strength for 256 bit keys.<br>\r\nThis extension registers the following:\r\n<ul>\r\n  <li>AES Encrypt / Decrypt Payload Encoder</li>\r\n  <li>Scanner Insertion Point Provider: attempts to insert payloads inside encrypted insertion points</li>\r\n  <li>Custom editor tab: attempts to decrypt the message body</li>\r\n</ul>\r\n\r\n</html>");
     	lblDescription.setHorizontalAlignment(SwingConstants.LEFT);
     	lblDescription.setVerticalAlignment(SwingConstants.TOP);
     	GridBagConstraints gbc_lblDescription = new GridBagConstraints();
