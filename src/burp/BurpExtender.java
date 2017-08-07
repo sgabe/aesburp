@@ -26,7 +26,7 @@ import java.awt.event.ActionEvent;
 import java.beans.PropertyChangeListener;
 import java.beans.PropertyChangeEvent;
 
-public class BurpExtender implements IBurpExtender, IScannerInsertionPointProvider, ITab, IMessageEditorTabFactory {
+public class BurpExtender implements IBurpExtender, IScannerInsertionPointProvider, ITab, IMessageEditorTabFactory, IProxyListener, IHttpListener {
     
 	// IExtensionHelpers helpers;
 	public IExtensionHelpers helpers;
@@ -42,6 +42,7 @@ public class BurpExtender implements IBurpExtender, IScannerInsertionPointProvid
     private JComboBox comboAESMode;
     private JLabel lbl3;
     private JCheckBox chckbxNewCheckBox;
+    private JCheckBox chckbxEnableListeners;
     private JPanel panel_1;
     private JButton btnNewButton;
     private JTextArea textAreaPlaintext;
@@ -68,7 +69,7 @@ public class BurpExtender implements IBurpExtender, IScannerInsertionPointProvid
         helpers = callbacks.getHelpers();
 
         // set our extension name
-        callbacks.setExtensionName("AES Crypto v1.2");
+        callbacks.setExtensionName("AES Crypto v1.3");
       
         // Register payload encoders
         payloadEncryptor = new IntruderPayloadProcessor(this, 1);
@@ -82,6 +83,12 @@ public class BurpExtender implements IBurpExtender, IScannerInsertionPointProvid
         
         // register ourselves as a message editor tab factory
         callbacks.registerMessageEditorTabFactory(this);
+
+        // register ourselves as a Proxy listener
+        callbacks.registerProxyListener(this);
+
+        // register ourselves as an HTTP listener
+        callbacks.registerHttpListener(this);
 
         isURLEncoded = false;
         
@@ -233,12 +240,12 @@ public class BurpExtender implements IBurpExtender, IScannerInsertionPointProvid
     	panel = new JPanel();
     	GridBagLayout gbl_panel = new GridBagLayout();
     	gbl_panel.columnWidths = new int[]{197, 400, 0};
-    	gbl_panel.rowHeights = new int[]{0, 0, 0, 0, 0, 0, 0, 0};
+        gbl_panel.rowHeights = new int[]{0, 0, 0, 0, 0, 0, 0, 0, 0};
     	gbl_panel.columnWeights = new double[]{1.0, 1.0, Double.MIN_VALUE};
-    	gbl_panel.rowWeights = new double[]{0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, Double.MIN_VALUE};
+        gbl_panel.rowWeights = new double[]{0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, Double.MIN_VALUE};
     	panel.setLayout(gbl_panel);
 
-        lblDescription = new JLabel("<html><b>BURP AES Manipulation functions v1.2</b>\r\n<br>\r\n<br>\r\ntwitter: twitter.com/lgrangeia\r\n<br>\r\ngithub: github.com/lgrangeia\r\n<br>\r\n<br>\r\nAES key can be 128, 192 or 256 bits, but you need to install Java Cryptography Extension (JCE) Unlimited Strength for 256 bit keys.<br>\r\nThis extension registers the following:\r\n<ul>\r\n  <li>AES Encrypt / Decrypt Payload Encoder</li>\r\n  <li>Scanner Insertion Point Provider: attempts to insert payloads inside encrypted insertion points</li>\r\n  <li>Custom editor tab: attempts to decrypt the message body</li>\r\n</ul>\r\n\r\n</html>");
+        lblDescription = new JLabel("<html><b>BURP AES Manipulation functions v1.3</b>\r\n<br>\r\n<br>\r\ntwitter: twitter.com/lgrangeia\r\n<br>\r\ngithub: github.com/lgrangeia\r\n<br>\r\n<br>\r\nAES key can be 128, 192 or 256 bits, but you need to install Java Cryptography Extension (JCE) Unlimited Strength for 256 bit keys.<br>\r\nThis extension registers the following:\r\n<ul>\r\n  <li>AES Encrypt / Decrypt Payload Encoder</li>\r\n  <li>Scanner Insertion Point Provider: attempts to insert payloads inside encrypted insertion points</li>\r\n  <li>Custom editor tab: attempts to decrypt the message body</li>\r\n  <li>Proxy and HTTP listeners: allows to transparently decrypt / encrypt requests and responses (useful for scanning when the message body is encrypted)</li>\r\n</ul>\r\n\r\n</html>");
     	lblDescription.setHorizontalAlignment(SwingConstants.LEFT);
     	lblDescription.setVerticalAlignment(SwingConstants.TOP);
     	GridBagConstraints gbc_lblDescription = new GridBagConstraints();
@@ -294,14 +301,23 @@ public class BurpExtender implements IBurpExtender, IScannerInsertionPointProvid
     	gbc_chckbxNewCheckBox.gridx = 1;
     	gbc_chckbxNewCheckBox.gridy = 3;
     	panel.add(chckbxNewCheckBox, gbc_chckbxNewCheckBox);
-    	
+
+        chckbxEnableListeners = new JCheckBox("Enable Proxy and HTTP listeners");
+        chckbxEnableListeners.setEnabled(true);
+        GridBagConstraints gbc_chckbxEnableListeners = new GridBagConstraints();
+        gbc_chckbxEnableListeners.fill = GridBagConstraints.HORIZONTAL;
+        gbc_chckbxEnableListeners.insets = new Insets(0, 0, 5, 0);
+        gbc_chckbxEnableListeners.gridx = 1;
+        gbc_chckbxEnableListeners.gridy = 4;
+        panel.add(chckbxEnableListeners, gbc_chckbxEnableListeners);
+
     	lbl4 = new JLabel("Ciphertext encoding:");
     	lbl4.setHorizontalAlignment(SwingConstants.RIGHT);
     	GridBagConstraints gbc_lbl4 = new GridBagConstraints();
     	gbc_lbl4.anchor = GridBagConstraints.EAST;
     	gbc_lbl4.insets = new Insets(0, 0, 5, 5);
     	gbc_lbl4.gridx = 0;
-    	gbc_lbl4.gridy = 4;
+        gbc_lbl4.gridy = 5;
     	panel.add(lbl4, gbc_lbl4);
     	
     	comboEncoding = new JComboBox();
@@ -311,7 +327,7 @@ public class BurpExtender implements IBurpExtender, IScannerInsertionPointProvid
     	gbc_comboEncoding.insets = new Insets(0, 0, 5, 0);
     	gbc_comboEncoding.fill = GridBagConstraints.HORIZONTAL;
     	gbc_comboEncoding.gridx = 1;
-    	gbc_comboEncoding.gridy = 4;
+        gbc_comboEncoding.gridy = 5;
     	panel.add(comboEncoding, gbc_comboEncoding);
     	
     	lbl3 = new JLabel("AES Mode:");
@@ -320,7 +336,7 @@ public class BurpExtender implements IBurpExtender, IScannerInsertionPointProvid
     	gbc_lbl3.insets = new Insets(0, 0, 5, 5);
     	gbc_lbl3.anchor = GridBagConstraints.EAST;
     	gbc_lbl3.gridx = 0;
-    	gbc_lbl3.gridy = 5;
+        gbc_lbl3.gridy = 6;
     	panel.add(lbl3, gbc_lbl3);
     	
     	comboAESMode = new JComboBox();
@@ -340,7 +356,7 @@ public class BurpExtender implements IBurpExtender, IScannerInsertionPointProvid
     	gbc_comboAESMode.insets = new Insets(0, 0, 5, 0);
     	gbc_comboAESMode.fill = GridBagConstraints.HORIZONTAL;
     	gbc_comboAESMode.gridx = 1;
-    	gbc_comboAESMode.gridy = 5;
+        gbc_comboAESMode.gridy = 6;
     	panel.add(comboAESMode, gbc_comboAESMode);
     	
     	panel_1 = new JPanel();
@@ -348,7 +364,7 @@ public class BurpExtender implements IBurpExtender, IScannerInsertionPointProvid
     	gbc_panel_1.gridwidth = 2;
     	gbc_panel_1.fill = GridBagConstraints.BOTH;
     	gbc_panel_1.gridx = 0;
-    	gbc_panel_1.gridy = 6;
+        gbc_panel_1.gridy = 7;
     	panel.add(panel_1, gbc_panel_1);
     	GridBagLayout gbl_panel_1 = new GridBagLayout();
     	gbl_panel_1.columnWidths = new int[]{0, 0, 0, 0};
@@ -591,4 +607,103 @@ public class BurpExtender implements IBurpExtender, IScannerInsertionPointProvid
     	
     }
 
+    // +--------+---------------+--------------+--------+--------------+---------------+--------+
+    // |        |            REQUEST           |        |           RESPONSE           |        |
+    // +        +---------------+--------------+        +--------------+---------------+        +
+    // | CLIENT | ProxyListener | HttpListener | SERVER | HttpListener | ProxyListener | CLIENT |
+    // +        +---------------+--------------+        +--------------+---------------+        +
+    // |        |    decrypt    |   encrypt    |        |    decrypt   |    encrypt    |        |
+    // +--------+---------------+--------------+--------+--------------+---------------+--------+
+
+    //
+    // implement IProxyListener
+    //
+
+    @Override
+    public void processProxyMessage(boolean messageIsRequest, IInterceptedProxyMessage message) {
+        if (!chckbxEnableListeners.isSelected()) {
+            return;
+        }
+
+        IHttpRequestResponse messageInfo = message.getMessageInfo();
+
+        try {
+            if (messageIsRequest) {
+                byte[] request = messageInfo.getRequest();
+                List<String> headers = helpers.analyzeRequest(messageInfo).getHeaders();
+                int bodyOffset = helpers.analyzeRequest(messageInfo).getBodyOffset();
+                String method = helpers.analyzeRequest(messageInfo).getMethod();
+                byte[] bodyArray = Arrays.copyOfRange(request, bodyOffset, request.length);
+                String body = helpers.bytesToString(bodyArray).replaceAll("\r", "").replaceAll("\n", "");
+
+                messageInfo.setRequest(
+                    helpers.buildHttpMessage(
+                        headers,
+                        decrypt(body).getBytes()
+                ));
+            } else {
+                byte[] response = messageInfo.getResponse();
+                List<String> headers = helpers.analyzeResponse(response).getHeaders();
+                int bodyOffset = helpers.analyzeResponse(response).getBodyOffset();
+                byte[] bodyArray = Arrays.copyOfRange(response, bodyOffset, response.length);
+                String body = helpers.bytesToString(bodyArray);
+
+                if (body != null && !body.isEmpty()) {
+                    messageInfo.setResponse(
+                        helpers.buildHttpMessage(
+                            headers,
+                            encrypt(body).getBytes()
+                    ));
+                }
+            }
+        }
+        catch(Exception e) {
+        }
+
+    }
+
+    //
+    // implement IHttpListener
+    //
+
+    @Override
+    public void processHttpMessage(int toolFlag, boolean messageIsRequest, IHttpRequestResponse messageInfo) {
+        if (!chckbxEnableListeners.isSelected()) {
+            return;
+        }
+
+        try {
+            if (messageIsRequest) {
+                byte[] request = messageInfo.getRequest();
+                String method = helpers.analyzeRequest(messageInfo).getMethod();
+                List<String> headers = helpers.analyzeRequest(messageInfo).getHeaders();
+                int bodyOffset = helpers.analyzeRequest(messageInfo).getBodyOffset();
+                byte[] bodyArray = Arrays.copyOfRange(request, bodyOffset, request.length);
+                String body = helpers.bytesToString(bodyArray);
+
+                if (method == "POST" && body != null && !body.isEmpty()) {
+                    messageInfo.setRequest(
+                        helpers.buildHttpMessage(
+                            headers,
+                            encrypt(body).getBytes()
+                    ));
+                }
+            } else {
+                byte[] request = messageInfo.getResponse();
+                List<String> headers = helpers.analyzeResponse(messageInfo.getResponse()).getHeaders();
+                int bodyOffset = helpers.analyzeResponse(request).getBodyOffset();
+                byte[] bodyArray = Arrays.copyOfRange(request, bodyOffset, request.length);
+                String body = helpers.bytesToString(bodyArray).replaceAll("\r", "").replaceAll("\n", "");
+
+                messageInfo.setResponse(
+                    helpers.buildHttpMessage(
+                        headers,
+                        decrypt(body).getBytes()
+                ));
+            }
+        }
+        catch(Exception e) {
+        }
+
+    }
 }
